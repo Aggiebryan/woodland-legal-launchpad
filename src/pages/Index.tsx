@@ -1,13 +1,48 @@
-// Update this page (the content is just a fallback if you fail to update the page)
+
+import React, { useState } from 'react';
+import LoginPage from '@/components/LoginPage';
+import Dashboard from '@/components/Dashboard';
+import WorkflowPage from '@/components/WorkflowPage';
 
 const Index = () => {
+  const [isLoggedIn, setIsLoggedIn] = useState(false);
+  const [selectedWorkflow, setSelectedWorkflow] = useState<string | null>(null);
+
+  const handleLogin = () => {
+    setIsLoggedIn(true);
+  };
+
+  const handleLogout = () => {
+    setIsLoggedIn(false);
+    setSelectedWorkflow(null);
+  };
+
+  const handleWorkflowSelect = (workflow: string) => {
+    setSelectedWorkflow(workflow);
+  };
+
+  const handleBackToDashboard = () => {
+    setSelectedWorkflow(null);
+  };
+
+  if (!isLoggedIn) {
+    return <LoginPage onLogin={handleLogin} />;
+  }
+
+  if (selectedWorkflow) {
+    return (
+      <WorkflowPage
+        workflow={selectedWorkflow}
+        onBack={handleBackToDashboard}
+      />
+    );
+  }
+
   return (
-    <div className="min-h-screen flex items-center justify-center bg-background">
-      <div className="text-center">
-        <h1 className="text-4xl font-bold mb-4">Welcome to Your Blank App</h1>
-        <p className="text-xl text-muted-foreground">Start building your amazing project here!</p>
-      </div>
-    </div>
+    <Dashboard
+      onWorkflowSelect={handleWorkflowSelect}
+      onLogout={handleLogout}
+    />
   );
 };
 
