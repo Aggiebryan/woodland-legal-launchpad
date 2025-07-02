@@ -71,3 +71,12 @@ Yes, you can!
 To connect a domain, navigate to Project > Settings > Domains and click Connect Domain.
 
 Read more here: [Setting up a custom domain](https://docs.lovable.dev/tips-tricks/custom-domain#step-by-step-guide)
+## Automatic storage cleanup
+
+Temporary files uploaded to Supabase are deleted by a background task. You can run the cleanup manually with:
+
+```sh
+npm run cleanup
+```
+
+Schedule this command with a cron service to run periodically (for example daily) using credentials with the `service role` key.
