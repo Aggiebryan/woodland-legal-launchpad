@@ -312,7 +312,7 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
                         <Checkbox
                           id="plaintiff"
                           checked={isPlaintiff}
-                          onCheckedChange={setIsPlaintiff}
+                          onCheckedChange={(checked) => setIsPlaintiff(checked === true)}
                           className="border-slate-600"
                         />
                         <Label htmlFor="plaintiff" className="text-white">Plaintiff</Label>
@@ -321,7 +321,7 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
                         <Checkbox
                           id="defendant"
                           checked={isDefendant}
-                          onCheckedChange={setIsDefendant}
+                          onCheckedChange={(checked) => setIsDefendant(checked === true)}
                           className="border-slate-600"
                         />
                         <Label htmlFor="defendant" className="text-white">Defendant</Label>
@@ -376,7 +376,7 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
                     <Checkbox
                       id="stowers-demand"
                       checked={stowersDemand}
-                      onCheckedChange={setStowersDemand}
+                      onCheckedChange={(checked) => setStowersDemand(checked === true)}
                       className="border-slate-600"
                     />
                     <Label htmlFor="stowers-demand" className="text-white">Stowers Demand</Label>
