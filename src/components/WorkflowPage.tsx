@@ -39,7 +39,7 @@ const getWorkflowTitle = (workflow: string) => {
 const getWebhookUrl = (workflow: string) => {
   const webhooks: Record<string, string> = {
     'demand-letter': 'https://n8n.twlf.dev/webhook/demandletter',
-    'petition': 'https://n8n.twlf.dev/webhook/petition',
+    'petition': 'https://n8n.twlf.dev/webhook-test/draftpetition',
     'motion': 'https://n8n.twlf.dev/webhook/motion',
     'response': 'https://n8n.twlf.dev/webhook/response',
     'discovery-requests': 'https://n8n.twlf.dev/webhook/discoveryreq',
