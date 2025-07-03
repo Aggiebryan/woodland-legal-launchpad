@@ -12,6 +12,7 @@ import {
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { ArrowLeft, Upload, FileText } from 'lucide-react';
 import { toast } from 'sonner';
 
@@ -35,18 +36,41 @@ const getWorkflowTitle = (workflow: string) => {
   return titles[workflow] || 'Legal Workflow';
 };
 
+const getWebhookUrl = (workflow: string) => {
+  const webhooks: Record<string, string> = {
+    'demand-letter': 'https://n8n.twlf.dev/webhook/demandletter',
+    'petition': 'https://n8n.twlf.dev/webhook/petition',
+    'motion': 'https://n8n.twlf.dev/webhook/motion',
+    'response': 'https://n8n.twlf.dev/webhook/response',
+    'discovery-requests': 'https://n8n.twlf.dev/webhook/discoveryreq',
+    'settlement-letter': 'https://n8n.twlf.dev/webhook/settlement',
+    'affidavit': 'https://n8n.twlf.dev/webhook/affidavit',
+    'estate-planning': 'https://n8n.twlf.dev/webhook/estateplan'
+  };
+  return webhooks[workflow] || '';
+};
+
 const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
   const [matter, setMatter] = useState('');
+  const [otherMatterDescription, setOtherMatterDescription] = useState('');
   const [clioMatters, setClioMatters] = useState<any[]>([]);
   const [loadingMatters, setLoadingMatters] = useState(false);
   const [notes, setNotes] = useState('');
   const [files, setFiles] = useState<FileList | null>(null);
-  const [webhookUrl, setWebhookUrl] = useState('');
+  const [responseFile, setResponseFile] = useState<FileList | null>(null);
+  const [petitionFile, setPetitionFile] = useState<FileList | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+
+  // Specific fields for different workflows
+  const [stowersDemand, setStowersDemand] = useState(false);
+  const [motionType, setMotionType] = useState('');
+  const [affidavitFor, setAffidavitFor] = useState('');
+  const [estatePlanningFor, setEstatePlanningFor] = useState('');
+  const [isPlaintiff, setIsPlaintiff] = useState(false);
+  const [isDefendant, setIsDefendant] = useState(false);
 
   useEffect(() => {
     const fetchMatters = async () => {
-      if (workflow !== 'petition') return;
       setLoadingMatters(true);
       try {
         const tokenRes = await fetch('https://app.clio.com/oauth/token', {
@@ -78,44 +102,16 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
     };
 
     fetchMatters();
-  }, [workflow]);
+  }, []);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFiles(e.target.files);
-  };
-
-  const uploadFilesToSupabase = async (): Promise<string[]> => {
-    if (!files || files.length === 0) return [];
-    const uploaded: string[] = [];
-    const project = import.meta.env.VITE_SUPABASE_PROJECT_ID;
-    const supabaseUrl =
-      import.meta.env.VITE_SUPABASE_URL || `https://${project}.supabase.co`;
-    const supabaseKey = import.meta.env.VITE_SUPABASE_ANON_KEY;
-    const bucket = 'documents';
-
-    for (const file of Array.from(files)) {
-      const path = `petition/${Date.now()}-${file.name}`;
-      const res = await fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${path}`, {
-        method: 'PUT',
-        headers: {
-          Authorization: `Bearer ${supabaseKey}`,
-          'Content-Type': file.type,
-          'x-upsert': 'false',
-        },
-        body: file,
-      });
-      if (res.ok) {
-        uploaded.push(path);
-        // schedule delete after 24h
-        setTimeout(() => {
-          fetch(`${supabaseUrl}/storage/v1/object/${bucket}/${path}`, {
-            method: 'DELETE',
-            headers: { Authorization: `Bearer ${supabaseKey}` },
-          });
-        }, 24 * 60 * 60 * 1000);
-      }
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>, fileType: 'general' | 'response' | 'petition') => {
+    if (fileType === 'general') {
+      setFiles(e.target.files);
+    } else if (fileType === 'response') {
+      setResponseFile(e.target.files);
+    } else if (fileType === 'petition') {
+      setPetitionFile(e.target.files);
     }
-    return uploaded;
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -123,41 +119,144 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
     setIsSubmitting(true);
 
     try {
-      const uploadedPaths = await uploadFilesToSupabase();
+      const webhookUrl = getWebhookUrl(workflow);
+      
       // Prepare the data for the webhook
       const workflowData = {
         workflowType: workflow,
-        matter,
+        matter: matter === 'other' ? otherMatterDescription : matter,
         notes,
         fileCount: files?.length || 0,
-        uploadedPaths,
-        footerMatter: matter,
+        responseFileCount: responseFile?.length || 0,
+        petitionFileCount: petitionFile?.length || 0,
         timestamp: new Date().toISOString(),
-        user: 'test' // In production, this would be the actual user
+        user: 'test',
+        // Workflow-specific fields
+        ...(workflow === 'demand-letter' && { stowersDemand }),
+        ...(workflow === 'motion' && { motionType }),
+        ...(workflow === 'affidavit' && { affidavitFor }),
+        ...(workflow === 'estate-planning' && { estatePlanningFor }),
+        ...(workflow === 'discovery-requests' && { 
+          representingParty: {
+            plaintiff: isPlaintiff,
+            defendant: isDefendant
+          }
+        })
       };
 
       console.log('Submitting workflow data:', workflowData);
 
-      if (webhookUrl) {
-        // Call the webhook if URL is provided
-        const response = await fetch(webhookUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          mode: 'no-cors',
-          body: JSON.stringify(workflowData),
-        });
+      const response = await fetch(webhookUrl, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        mode: 'no-cors',
+        body: JSON.stringify(workflowData),
+      });
 
-        toast.success('Workflow submitted successfully! The document will be processed and available for download shortly.');
-      } else {
-        // Simulate workflow submission
-        await new Promise(resolve => setTimeout(resolve, 2000));
-        toast.success('Workflow submitted successfully! (Note: Configure webhook URL for actual processing)');
-      }
+      toast.success('All documents have been submitted. Your document will be created shortly. All documents must be reviewed and finalized before use.');
 
       // Reset form
-@@ -101,58 +183,79 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
+      setMatter('');
+      setOtherMatterDescription('');
+      setNotes('');
+      setFiles(null);
+      setResponseFile(null);
+      setPetitionFile(null);
+      setStowersDemand(false);
+      setMotionType('');
+      setAffidavitFor('');
+      setEstatePlanningFor('');
+      setIsPlaintiff(false);
+      setIsDefendant(false);
+    } catch (error) {
+      console.error('Error submitting workflow:', error);
+      toast.error('Failed to submit workflow. Please try again.');
+    } finally {
+      setIsSubmitting(false);
+    }
+  };
+
+  const renderMatterSelect = () => (
+    <div className="space-y-2">
+      <Label htmlFor="matter" className="text-white">Matter/Case Description</Label>
+      <Select value={matter} onValueChange={setMatter}>
+        <SelectTrigger
+          id="matter"
+          className="bg-slate-800/50 border-slate-600 text-white"
+        >
+          <SelectValue placeholder={loadingMatters ? 'Loading...' : 'Select a matter'} />
+        </SelectTrigger>
+        <SelectContent className="bg-slate-800 border-slate-600 text-white">
+          {clioMatters.map((m) => (
+            <SelectItem
+              key={m.id}
+              value={`${m.display_number} - ${m.description}`}
+              className="text-white hover:bg-slate-700"
+            >
+              {m.display_number} - {m.description}
+            </SelectItem>
+          ))}
+          <SelectItem value="other" className="text-white hover:bg-slate-700">
+            Other
+          </SelectItem>
+        </SelectContent>
+      </Select>
+      {matter === 'other' && (
+        <Input
+          value={otherMatterDescription}
+          onChange={(e) => setOtherMatterDescription(e.target.value)}
+          className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-400"
+          placeholder="Enter matter description"
+          required
+        />
+      )}
+    </div>
+  );
+
+  const renderFileUpload = (label: string, fileType: 'general' | 'response' | 'petition', acceptedTypes?: string) => (
+    <div className="space-y-2">
+      <Label htmlFor={`${fileType}-upload`} className="text-white">{label}</Label>
+      <div className="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center hover:border-slate-500 transition-colors">
+        <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
+        <input
+          id={`${fileType}-upload`}
+          type="file"
+          multiple={fileType === 'general'}
+          onChange={(e) => handleFileChange(e, fileType)}
+          className="hidden"
+          accept={acceptedTypes || ".pdf,.doc,.docx,.txt,.xls,.xlsx"}
+        />
+        <Label htmlFor={`${fileType}-upload`} className="cursor-pointer">
+          <span className="text-white">Click to upload files</span>
+          <span className="text-slate-400 block text-sm mt-1">
+            {acceptedTypes ? 'PDF, DOC, TXT files supported' : 'PDF, DOC, DOCX, TXT, XLS, XLSX files supported'}
+          </span>
+        </Label>
+        {((fileType === 'general' && files && files.length > 0) ||
+          (fileType === 'response' && responseFile && responseFile.length > 0) ||
+          (fileType === 'petition' && petitionFile && petitionFile.length > 0)) && (
+          <div className="mt-2 text-sm text-blue-200">
+            {fileType === 'general' ? files?.length : 
+             fileType === 'response' ? responseFile?.length : 
+             petitionFile?.length} file(s) selected
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="min-h-screen" style={{ background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' }}>
+      <header className="border-b border-slate-700 bg-slate-900/50 backdrop-blur-sm">
+        <div className="container mx-auto px-4 py-4 flex items-center">
+          <Button
+            onClick={onBack}
+            variant="ghost"
+            className="text-white hover:bg-slate-700 mr-4"
+          >
+            <ArrowLeft className="w-4 h-4 mr-2" />
             Back to Dashboard
           </Button>
           <div>
@@ -181,62 +280,133 @@ const WorkflowPage = ({ workflow, onBack }: WorkflowPageProps) => {
             </CardHeader>
             <CardContent>
               <form onSubmit={handleSubmit} className="space-y-6">
-                <div className="space-y-2">
-                  <Label htmlFor="matter" className="text-white">Matter/Case Description</Label>
-                  {workflow === 'petition' ? (
-                    <Select value={matter} onValueChange={setMatter}>
-                      <SelectTrigger
-                        id="matter"
-                        className="bg-slate-800/50 border-slate-600 text-white"
-                      >
-                        <SelectValue placeholder={loadingMatters ? 'Loading...' : 'Select a matter'} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        {clioMatters.map((m) => (
-                          <SelectItem
-                            key={m.id}
-                            value={`${m.display_number} - ${m.description}`}
-                          >
-                            {m.display_number} - {m.description}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
+                {renderMatterSelect()}
+
+                {workflow === 'motion' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="motion-type" className="text-white">Motion Type</Label>
                     <Input
-                      id="matter"
-                      value={matter}
-                      onChange={(e) => setMatter(e.target.value)}
+                      id="motion-type"
+                      value={motionType}
+                      onChange={(e) => setMotionType(e.target.value)}
                       className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-400"
-                      placeholder="Enter the matter or case description"
+                      placeholder="Enter motion type"
                       required
                     />
-                  )}
-                </div>
+                  </div>
+                )}
+
+                {workflow === 'response' && (
+                  renderFileUpload('Upload File to Respond To', 'response', '.pdf,.doc,.docx,.txt')
+                )}
+
+                {workflow === 'discovery-requests' && (
+                  renderFileUpload('Upload Petition', 'petition', '.pdf,.doc,.docx,.txt')
+                )}
+
+                {workflow === 'discovery-requests' && (
+                  <div className="space-y-2">
+                    <Label className="text-white">What party are you representing?</Label>
+                    <div className="flex space-x-6">
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="plaintiff"
+                          checked={isPlaintiff}
+                          onCheckedChange={setIsPlaintiff}
+                          className="border-slate-600"
+                        />
+                        <Label htmlFor="plaintiff" className="text-white">Plaintiff</Label>
+                      </div>
+                      <div className="flex items-center space-x-2">
+                        <Checkbox
+                          id="defendant"
+                          checked={isDefendant}
+                          onCheckedChange={setIsDefendant}
+                          className="border-slate-600"
+                        />
+                        <Label htmlFor="defendant" className="text-white">Defendant</Label>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {workflow === 'affidavit' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="affidavit-for" className="text-white">Who is this affidavit for?</Label>
+                    <Input
+                      id="affidavit-for"
+                      value={affidavitFor}
+                      onChange={(e) => setAffidavitFor(e.target.value)}
+                      className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-400"
+                      placeholder="Enter who this affidavit is for"
+                      required
+                    />
+                  </div>
+                )}
+
+                {workflow === 'estate-planning' && (
+                  <div className="space-y-2">
+                    <Label htmlFor="estate-planning-for" className="text-white">Who is this for?</Label>
+                    <Input
+                      id="estate-planning-for"
+                      value={estatePlanningFor}
+                      onChange={(e) => setEstatePlanningFor(e.target.value)}
+                      className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-400"
+                      placeholder="Enter who this is for"
+                      required
+                    />
+                  </div>
+                )}
+
+                {renderFileUpload('Upload Supporting Files', 'general')}
 
                 <div className="space-y-2">
-                  <Label htmlFor="file-upload" className="text-white">Upload Supporting Files</Label>
-                  <div className="border-2 border-dashed border-slate-600 rounded-lg p-6 text-center hover:border-slate-500 transition-colors">
-                    <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
-                    <input
-                      id="file-upload"
-                      type="file"
-                      multiple
-                      onChange={handleFileChange}
-                      className="hidden"
-                    />
-                    <Label htmlFor="file-upload" className="cursor-pointer">
-                      <span className="text-white">Click to upload files</span>
-                      <span className="text-slate-400 block text-sm mt-1">
-                        PDF, DOC, DOCX, TXT files supported
-                      </span>
-                    </Label>
-                    {files && files.length > 0 && (
-                      <div className="mt-2 text-sm text-blue-200">
-                        {files.length} file(s) selected
-                      </div>
-                    )}
-                  </div>
+                  <Label htmlFor="notes" className="text-white">Additional Notes</Label>
+                  <Textarea
+                    id="notes"
+                    value={notes}
+                    onChange={(e) => setNotes(e.target.value)}
+                    className="bg-slate-800/50 border-slate-600 text-white placeholder:text-slate-400 min-h-[100px]"
+                    placeholder="Enter any additional notes, special instructions, or relevant details"
+                  />
+                </div>
 
+                {workflow === 'demand-letter' && (
+                  <div className="flex items-center space-x-2">
+                    <Checkbox
+                      id="stowers-demand"
+                      checked={stowersDemand}
+                      onCheckedChange={setStowersDemand}
+                      className="border-slate-600"
+                    />
+                    <Label htmlFor="stowers-demand" className="text-white">Stowers Demand</Label>
+                  </div>
+                )}
+
+                <div className="flex justify-between pt-4">
+                  <Button
+                    type="button"
+                    onClick={onBack}
+                    variant="outline"
+                    className="border-slate-600 text-white hover:bg-slate-700"
+                  >
+                    Cancel
+                  </Button>
+                  <Button
+                    type="submit"
+                    disabled={isSubmitting || !matter}
+                    className="bg-primary hover:bg-primary/90 text-white"
+                  >
+                    {isSubmitting ? 'Submitting...' : `Submit ${getWorkflowTitle(workflow)}`}
+                  </Button>
+                </div>
+              </form>
+            </CardContent>
+          </Card>
+        </div>
+      </main>
+    </div>
+  );
+};
 
 export default WorkflowPage;
